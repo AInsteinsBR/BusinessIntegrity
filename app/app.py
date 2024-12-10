@@ -12,21 +12,27 @@ logger = logging.getLogger(__name__)
 
 
 def create_app():
-    app = Flask(__name__)
+    """Create and configure the Flask application."""
+    app = Flask(__name__, template_folder="templates")
     CORS(app)
 
-    # Load configurations
     app.config["DB_CONFIG"] = {
-        "host": os.getenv("DB_HOST", "localhost"),
-        "user": os.getenv("DB_USER", "root"),
-        "password": os.getenv("DB_PASSWORD", "yourpassword"),
-        "database": os.getenv("DB_NAME", "serp_database"),
+        "host": os.getenv("DB_HOST"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "database": os.getenv("DB_NAME"),
     }
     app.config["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY")
 
     with app.app_context():
-        from .routes import register_routes
+        from routes import register_search_routes, register_utility_routes
 
-        register_routes(app)
+        register_search_routes(app)
+        register_utility_routes(app)
 
     return app
+
+
+if __name__ == "__main__":
+    app = create_app()
+    app.run(debug=True, port=8080, use_reloader=True)
