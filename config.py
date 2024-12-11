@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-
 def connect_to_database(config):
     try:
         connection = mysql.connector.connect(**config)
@@ -26,19 +25,16 @@ def create_table_if_not_exists(connection):
     query_result_analysis = """
     CREATE TABLE IF NOT EXISTS result_analysis (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    search_type TEXT NOT NULL,
     search_query TEXT NOT NULL,
     search_datetime DATETIME NOT NULL,
-    analysis TEXT,
-    reasoning TEXT,
-    conclusion TEXT
+    ai_analysis TEXT
     );"""
 
     query_serp_results = """
     CREATE TABLE IF NOT EXISTS serp_results (
     id INT AUTO_INCREMENT PRIMARY KEY,
     analysis_id INT NOT NULL,
-    search_query TEXT NOT NULL,
-    search_datetime DATETIME NOT NULL,
     result_title TEXT,
     result_link TEXT,
     result_snippet TEXT,
