@@ -1,6 +1,5 @@
 import logging
 
-import markdown
 from aiomysql import create_pool
 from flask import Blueprint, current_app, jsonify, render_template, request
 from models import store_serp_results_with_analysis
@@ -50,8 +49,9 @@ async def process_query_search(query):
         search_results = await run_search(query)
         await insert_search_results("QUERY", query, search_results)
 
-        analysis_md = markdown.markdown(search_results["analysis"])
-        return render_template("analysis_result.html", analysis=analysis_md)
+        return render_template(
+            "analysis_result.html", analysis=search_results["analysis"]
+        )
     except Exception as e:
         logger.error(f"Error processing query search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -63,8 +63,9 @@ async def process_cnpj_search(cnpj):
         search_results = await run_search(query)
         await insert_search_results("CNPJ", cnpj, search_results)
 
-        analysis_md = markdown.markdown(search_results["analysis"])
-        return render_template("analysis_result.html", analysis=analysis_md)
+        return render_template(
+            "analysis_result.html", analysis=search_results["analysis"]
+        )
     except Exception as e:
         logger.error(f"Error processing CNPJ search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -97,9 +98,8 @@ async def view_table():
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
                     query = """
-                    SELECT sr.*, ra.ai_analysis
-                    FROM serp_results sr 
-                    JOIN result_analysis ra ON sr.analysis_id = ra.id 
+                    SELECT ra.id, ra.search_type, ra.search_query, ra.ai_analysis, ra.search_datetime
+                    FROM result_analysis ra
                     ORDER BY ra.search_datetime DESC
                     """
                     await cursor.execute(query)
@@ -120,7 +120,7 @@ async def get_last_rows():
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
                     query = """
-                    SELECT sr.*, ra.ai_analysis
+                    SELECT sr.*
                     FROM serp_results sr 
                     JOIN result_analysis ra ON sr.analysis_id = ra.id 
                     ORDER BY ra.search_datetime DESC

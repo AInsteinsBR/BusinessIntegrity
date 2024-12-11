@@ -1,56 +1,85 @@
-<!DOCTYPE html>
-<html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Table</title>
+    <title>View Rows</title>
     <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            color: #4CAF50;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
             margin: 20px 0;
-            font-size: 18px;
-            text-align: left;
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
-        table th,
-        table td {
-            padding: 12px;
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
             border: 1px solid #ddd;
         }
 
-        table th {
-            background-color: #3498db;
+        th {
+            background-color: #4CAF50;
             color: white;
         }
 
-        table tr:nth-child(even) {
+        tr:nth-child(even) {
             background-color: #f2f2f2;
+        }
+
+        a {
+            color: #1E88E5;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            table {
+                font-size: 14px;
+            }
+
+            th, td {
+                padding: 10px;
+            }
         }
     </style>
 </head>
 
 <body>
-    <h1>View Table</h1>
+    <h1>Last Rows</h1>
     <table>
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Query</th>
-                <th>Results</th>
-                <th>Analysis</th>
-                <th>Search Date</th>
+                <th>Tipo de Busca</th>
+                <th>Busca</th>
+                <th>Análise da IA</th>
+                <th>Data da Busca</th>
             </tr>
         </thead>
         <tbody>
             {% for row in rows %}
             <tr>
-                <td>{{ row.id }}</td>
-                <td>{{ row.query }}</td>
-                <td>{{ row.results }}</td>
-                <td>{{ row.ai_analysis }}</td>
-                <td>{{ row.search_datetime }}</td>
+                <td>{{ row[0] }}</td>
+                <td>{{ row[1] }}</td>
+                <td>{{ row[2] }}</td>
+                <td>{{ row[3] }}</td>
+                <td>{{ row[4] }}</td>
             </tr>
             {% endfor %}
         </tbody>
