@@ -2,6 +2,8 @@ import asyncio
 import io
 import logging
 import os
+import re
+import time
 
 import aiohttp
 import cohere as co
@@ -104,8 +106,16 @@ def split_text(texts, chunk_size=512):
     return [doc.page_content for doc in documents]
 
 
-async def create_embeddings(texts, max_retries=5, backoff_factor=2, initial_wait=1):
+async def create_embeddings(
+    texts,
+    max_retries=5,
+    backoff_factor=2,
+    initial_wait=1,
+    rate_limit=100,
+    rate_period=60,
+):
     texts_embeddings = []
+    request_times = []  # Track the timestamps of recent requests
 
     for i in range(0, len(texts), 96):
         retries = 0
@@ -113,6 +123,20 @@ async def create_embeddings(texts, max_retries=5, backoff_factor=2, initial_wait
 
         while not success and retries < max_retries:
             try:
+                # Enforce rate limiting
+                current_time = time()
+                # Remove timestamps outside the rate period
+                request_times = [
+                    t for t in request_times if current_time - t < rate_period
+                ]
+                if len(request_times) >= rate_limit:
+                    # Calculate wait time until a slot becomes available
+                    wait_time = rate_period - (current_time - request_times[0])
+                    logger.info(
+                        f"Rate limit reached. Waiting {wait_time:.2f} seconds..."
+                    )
+                    await asyncio.sleep(wait_time)
+
                 # Wrap synchronous cohere call in a coroutine
                 results = await asyncio.to_thread(
                     cohere_client.embed,
@@ -123,6 +147,9 @@ async def create_embeddings(texts, max_retries=5, backoff_factor=2, initial_wait
                 )
                 for text, embeddings in zip(results.texts, results.embeddings.float):
                     texts_embeddings.append({"text": text, "embedding": embeddings})
+
+                # Log the request timestamp
+                request_times.append(time())
 
                 success = True
             except Exception as e:
@@ -139,6 +166,7 @@ async def create_embeddings(texts, max_retries=5, backoff_factor=2, initial_wait
                 if retries >= max_retries:
                     logger.warning("Max retries reached. Skipping current request.")
                     break
+
     return texts_embeddings
 
 
@@ -249,6 +277,13 @@ async def scrape_content(search_results):
                 logger.error(f"Error scraping {url}: {e}")
                 scraped_data[url] = None
     return scraped_data
+
+
+def validate_cnpj(cnpj):
+    """Validate the CNPJ format (Brazilian business number)."""
+    # Basic regex check for CNPJ format (XX.XXX.XXX/XXXX-XX)
+    cnpj_regex = r"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$"
+    return re.match(cnpj_regex, cnpj) is not None
 
 
 # if __name__ == "__main__":
