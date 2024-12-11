@@ -281,9 +281,29 @@ async def scrape_content(search_results):
 
 def validate_cnpj(cnpj):
     """Validate the CNPJ format (Brazilian business number)."""
-    # Basic regex check for CNPJ format (XX.XXX.XXX/XXXX-XX)
     cnpj_regex = r"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$"
     return re.match(cnpj_regex, cnpj) is not None
+
+
+async def run_search(query):
+    results = await google_search(query)
+
+    scraped_data = await scrape_content(results)
+
+    embeddings = []
+    for url, data in scraped_data.items():
+        if data:
+            logger.info(f"URL: {url}")
+            logger.info(f"Title: {data['title']}")
+            documents = split_text(data["text"])
+            search_embedding = await create_embeddings(documents)
+            embeddings.extend(search_embedding)
+
+    similar_documents = await similarity_search(query, embeddings, top_n=30)
+    reranked_documents = await rerank_documents(query, similar_documents, top_n=15)
+    analysis = analyze_text(query, reranked_documents)
+
+    return {"results": results, "analysis": analysis}
 
 
 # if __name__ == "__main__":

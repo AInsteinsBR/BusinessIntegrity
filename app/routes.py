@@ -1,18 +1,10 @@
 import logging
 
+import markdown
 from aiomysql import create_pool
 from flask import Blueprint, current_app, jsonify, render_template, request
 from models import store_serp_results_with_analysis
-from utils import (
-    analyze_text,
-    create_embeddings,
-    google_search,
-    rerank_documents,
-    scrape_content,
-    similarity_search,
-    split_text,
-    validate_cnpj,
-)
+from utils import run_search, validate_cnpj
 
 logger = logging.getLogger(__name__)
 
@@ -55,33 +47,11 @@ async def search():
 
 async def process_query_search(query):
     try:
+        search_results = await run_search(query)
+        await insert_search_results("QUERY", query, search_results)
 
-        results = await google_search(query)
-
-        scraped_data = await scrape_content(results)
-
-        embeddings = []
-        for url, data in scraped_data.items():
-            if data:
-                logger.info(f"URL: {url}")
-                logger.info(f"Title: {data['title']}")
-                documents = split_text(data["text"])
-                search_embedding = await create_embeddings(documents)
-                embeddings.extend(search_embedding)
-
-        similar_documents = await similarity_search(query, embeddings, top_n=30)
-        reranked_documents = await rerank_documents(query, similar_documents, top_n=15)
-        analysis = analyze_text(query, reranked_documents)
-
-        db_config = current_app.config["DB_CONFIG"]
-
-        async with create_pool(**db_config) as pool:
-            async with pool.acquire() as connection:
-                await store_serp_results_with_analysis(
-                    connection, query, results, analysis
-                )
-
-        return jsonify({"results": results, "analysis": analysis})
+        analysis_md = markdown.markdown(search_results["analysis"])
+        return render_template("analysis_result.html", analysis=analysis_md)
     except Exception as e:
         logger.error(f"Error processing query search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -89,11 +59,28 @@ async def process_query_search(query):
 
 async def process_cnpj_search(cnpj):
     try:
-        cnpj_data = {"cnpj": cnpj, "company_name": "Example Company"}
-        return jsonify({"cnpj_data": cnpj_data})
+        query = f"empresa {cnpj}"
+        search_results = await run_search(query)
+        await insert_search_results("CNPJ", cnpj, search_results)
+
+        analysis_md = markdown.markdown(search_results["analysis"])
+        return render_template("analysis_result.html", analysis=analysis_md)
     except Exception as e:
         logger.error(f"Error processing CNPJ search: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+async def insert_search_results(query_type, query, search_results):
+    db_config = current_app.config["DB_CONFIG"]
+    async with create_pool(**db_config) as pool:
+        async with pool.acquire() as connection:
+            await store_serp_results_with_analysis(
+                connection,
+                query_type,
+                query,
+                search_results["results"],
+                search_results["analysis"],
+            )
 
 
 @utility_routes.route("/")
@@ -110,14 +97,38 @@ async def view_table():
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
                     query = """
-                    SELECT sr.*, ra.analysis, ra.reasoning, ra.conclusion 
+                    SELECT sr.*, ra.ai_analysis
                     FROM serp_results sr 
                     JOIN result_analysis ra ON sr.analysis_id = ra.id 
-                    ORDER BY sr.search_datetime DESC
+                    ORDER BY ra.search_datetime DESC
                     """
                     await cursor.execute(query)
                     rows = await cursor.fetchall()
-        return jsonify(rows)
+        return render_template("view_table.html", rows=rows)
     except Exception as e:
         logger.error(f"Error rendering table: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@utility_routes.route("/last-rows", methods=["GET"])
+async def get_last_rows():
+    try:
+        db_config = current_app.config["DB_CONFIG"]
+        row_limit = int(request.args.get("limit", 10))
+
+        async with create_pool(**db_config) as pool:
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """
+                    SELECT sr.*, ra.ai_analysis
+                    FROM serp_results sr 
+                    JOIN result_analysis ra ON sr.analysis_id = ra.id 
+                    ORDER BY ra.search_datetime DESC
+                    LIMIT %s
+                    """
+                    await cursor.execute(query, (row_limit,))
+                    rows = await cursor.fetchall()
+        return render_template("view_rows.html", rows=rows)
+    except Exception as e:
+        logger.error(f"Error fetching last rows: {e}")
         return jsonify({"error": str(e)}), 500
