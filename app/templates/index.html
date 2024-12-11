@@ -46,10 +46,8 @@
             color: #2c3e50;
         }
 
-        select,
         input,
-        button,
-        textarea {
+        button {
             width: 100%;
             padding: 12px;
             border: 1px solid #ddd;
@@ -60,10 +58,8 @@
             transition: all 0.3s ease;
         }
 
-        select:focus,
         input:focus,
-        button:focus,
-        textarea:focus {
+        button:focus {
             border-color: #3498db;
             background-color: #fff;
             outline: none;
@@ -86,31 +82,25 @@
             background-color: #1c5984;
         }
 
-        textarea {
-            height: 200px;
-            resize: vertical;
-            background-color: #f1f1f1;
-        }
-
         #results {
             margin-top: 20px;
         }
 
-        #output {
+        #markdownOutput {
             font-family: 'Courier New', Courier, monospace;
             white-space: pre-wrap;
             word-wrap: break-word;
-            height: 200px;
-            background-color: #e9ecef;
-            color: #555;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
             border-radius: 4px;
+            color: #333;
         }
 
         .form-group {
             margin-bottom: 15px;
         }
 
-        /* Responsive Design */
         @media (max-width: 600px) {
             .container {
                 padding: 20px;
@@ -130,52 +120,94 @@
 <body>
     <div class="container">
         <h1>Search SERP API</h1>
-        <form id="searchForm">
-            <div class="form-group">
-                <label for="searchType">Search By:</label>
-                <select id="searchType" name="searchType" required>
-                    <option value="query">Query</option>
-                    <option value="cnpj">CNPJ</option>
-                </select>
-            </div>
 
-            <div class="form-group">
-                <label for="inputValue">Enter your search:</label>
-                <input type="text" id="inputValue" name="inputValue" required>
-            </div>
+        <div class="form-group">
+            <label for="inputValue">Enter your search:</label>
+            <input type="text" id="inputValue" name="inputValue" placeholder="Enter query or CNPJ" required>
+        </div>
 
-            <button type="submit">Search</button>
-        </form>
+        <button id="searchQueryBtn">Search Query</button>
+        <button id="searchCnpjBtn">Search CNPJ</button>
+        <button id="viewTableBtn">View Table</button>
+        <button id="getLastRowsBtn">Get Last Rows</button>
 
         <div id="results">
             <h2>Results:</h2>
-            <textarea readonly id="output"></textarea>
+            <div id="markdownOutput"></div>
         </div>
     </div>
 
     <script>
-        const form = document.getElementById("searchForm");
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
+        const searchQueryBtn = document.getElementById("searchQueryBtn");
+        const searchCnpjBtn = document.getElementById("searchCnpjBtn");
+        const viewTableBtn = document.getElementById("viewTableBtn");
+        const getLastRowsBtn = document.getElementById("getLastRowsBtn");
+        const inputValue = document.getElementById("inputValue");
+        const markdownOutput = document.getElementById("markdownOutput");
 
-            const searchType = document.getElementById("searchType").value;
-            const inputValue = document.getElementById("inputValue").value;
-            const output = document.getElementById("output");
-            output.value = "Loading...";
-
+        searchQueryBtn.addEventListener("click", async () => {
+            const query = inputValue.value;
+            if (!query) {
+                markdownOutput.innerHTML = "<p>Please enter a search query.</p>";
+                return;
+            }
+            markdownOutput.innerHTML = "<p>Loading...</p>";
             try {
                 const response = await fetch("/search", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
-                    body: JSON.stringify({ searchType, inputValue }),
+                    body: JSON.stringify({ searchType: "query", inputValue: query }),
                 });
                 const data = await response.json();
-                output.value = JSON.stringify(data, null, 2);
+                if (data.error) {
+                    markdownOutput.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                } else {
+                    markdownOutput.innerHTML = data.analysis; // Render markdown as HTML
+                }
             } catch (error) {
-                output.value = "Error: " + error.message;
+                markdownOutput.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
             }
+        });
+
+        searchCnpjBtn.addEventListener("click", async () => {
+            const cnpj = inputValue.value;
+            if (!cnpj) {
+                markdownOutput.innerHTML = "<p>Please enter a CNPJ.</p>";
+                return;
+            }
+            markdownOutput.innerHTML = "<p>Loading...</p>";
+            try {
+                const response = await fetch("/search", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ searchType: "cnpj", inputValue: cnpj }),
+                });
+                const data = await response.json();
+                if (data.error) {
+                    markdownOutput.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                } else {
+                    markdownOutput.innerHTML = data.analysis; // Render markdown as HTML
+                }
+            } catch (error) {
+                markdownOutput.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+
+        viewTableBtn.addEventListener("click", () => {
+            window.location.href = "/view-table";
+        });
+
+        getLastRowsBtn.addEventListener("click", async () => {
+            const limit = prompt("Enter the number of rows to fetch:");
+            if (!limit || isNaN(limit) || limit <= 0) {
+                markdownOutput.innerHTML = "<p>Invalid number of rows.</p>";
+                return;
+            }
+            window.location.href = `/last-rows?limit=${limit}`;
         });
     </script>
 </body>

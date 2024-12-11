@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Rows</title>
+</head>
+
+<body>
+    <h1>Last Rows</h1>
+    <ul>
+        {% for row in rows %}
+        <li>
+            <strong>ID:</strong> {{ row.id }} |
+            <strong>Query:</strong> {{ row.query }} |
+            <strong>Analysis:</strong> {{ row.ai_analysis }}
+        </li>
+        {% endfor %}
+    </ul>
+</body>
+
+</html>
