@@ -29,7 +29,7 @@ Begin your analysis by following these steps:
 1. First identify whether the query is a company name or CNPJ by checking if it consists of 14 digits (CNPJ) or contains letters/other characters (company name)
 
 2. Search through the documents for:
-- Direct mentions of the company name or CNPJ
+- Direct mentions of the company name, company name variations or CNPJ
 - Mentions of individuals associated with the company
 - References to suspicious transactions, contracts, or activities
 - Connections to known corruption schemes or investigations
@@ -55,19 +55,31 @@ Explain the logic behind your conclusion, including:
 
 <conclusion>
 State whether there is:
-[EVIDENCE OF CORRUPTION]: Strong evidence of corruption/fraud found
-[SUSPICIOUS ACTIVITY]: Some suspicious patterns but inconclusive evidence
-[NO EVIDENCE]: No significant evidence of corruption/fraud
-[INSUFFICIENT DATA]: Not enough information to make a determination
+[EVIDÊNCIA DE CORRUPÇÃO]: Strong evidence of corruption/fraud found
+[ATIVIDADE SUSPEITA]: Some suspicious patterns but inconclusive evidence
+[SEM EVIDÊNCIA]: No significant evidence of corruption/fraud
+[DADOS INSUFICIENTES]: Not enough information to make a determination
 </conclusion>
 
 Important rules:
 - Only make conclusions based on evidence found in the provided documents
-- Maintain objectivity and avoid speculation
 - Clearly distinguish between direct evidence and circumstantial connections
 - If the company name/CNPJ is not found in the documents, state this clearly
 - Do not include any external information not found in the documents
-- If documents are in Portuguese, analyze them in their original language but provide the analysis in English
+- provide the analysis in Portuguese
+
+Here is an example of response:
+## Análise
+<analysis>
+</analysis>
+
+## Pensamento
+<reasoning>
+</reasoning>
+
+## Conclusão
+<conclusion>
+</conclusion>
 
 Begin your analysis now.
 """
@@ -108,7 +120,7 @@ def split_text(texts, chunk_size=512):
 
 async def create_embeddings(
     texts,
-    max_retries=5,
+    max_retries=10,
     backoff_factor=2,
     initial_wait=1,
     rate_limit=100,

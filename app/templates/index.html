@@ -128,7 +128,7 @@
 
         <button id="searchQueryBtn">Buscar</button>
         <button id="searchCnpjBtn">Buscar CNPJ</button>
-        <button id="viewTableBtn">Ver buscar</button>
+        <button id="viewTableBtn">Ver buscas</button>
         <button id="getLastRowsBtn">Ver pesquisas no Google</button>
         <button id="viewAiAnalysisBtn">Ver análise da IA pelo ID</button>
 
@@ -162,6 +162,12 @@
                     },
                     body: JSON.stringify({ searchType: "query", inputValue: query }),
                 });
+
+                if (!response.ok) {
+                    markdownOutput.innerHTML = `<p style="color: red;">Server error: ${response.statusText}</p>`;
+                    return;
+                }
+
                 const data = await response.json();
                 if (data.error) {
                     markdownOutput.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
@@ -171,6 +177,7 @@
             } catch (error) {
                 markdownOutput.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
             }
+
         });
 
         searchCnpjBtn.addEventListener("click", async () => {

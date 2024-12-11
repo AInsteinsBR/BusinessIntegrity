@@ -1,5 +1,6 @@
 import logging
 
+import markdown
 from aiomysql import create_pool
 from flask import Blueprint, current_app, jsonify, render_template, request
 from models import store_serp_results_with_analysis
@@ -30,18 +31,25 @@ async def search():
     if not input_value:
         return jsonify({"error": "Input value is required"}), 400
 
-    if search_type == "query":
-        query = input_value
-        return await process_query_search(query)
+    try:
+        if search_type == "query":
+            query = input_value
+            html_content = await process_query_search(query)
+            return jsonify({"analysis": html_content})
 
-    elif search_type == "cnpj":
-        cnpj = input_value
-        if not validate_cnpj(cnpj):
-            return jsonify({"error": "Invalid CNPJ format"}), 400
-        return await process_cnpj_search(cnpj)
+        elif search_type == "cnpj":
+            cnpj = input_value
+            if not validate_cnpj(cnpj):
+                return jsonify({"error": "Invalid CNPJ format"}), 400
+            html_content = await process_cnpj_search(cnpj)
+            return jsonify({"analysis": html_content})
 
-    else:
-        return jsonify({"error": "Invalid search type"}), 400
+        else:
+            return jsonify({"error": "Invalid search type"}), 400
+
+    except Exception as e:
+        logger.error(f"Error during search: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 async def process_query_search(query):
@@ -49,9 +57,8 @@ async def process_query_search(query):
         search_results = await run_search(query)
         await insert_search_results("QUERY", query, search_results)
 
-        return render_template(
-            "analysis_result.html", analysis=search_results["analysis"]
-        )
+        html_content = markdown.markdown(search_results["analysis"])
+        return html_content
     except Exception as e:
         logger.error(f"Error processing query search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -63,9 +70,8 @@ async def process_cnpj_search(cnpj):
         search_results = await run_search(query)
         await insert_search_results("CNPJ", cnpj, search_results)
 
-        return render_template(
-            "analysis_result.html", analysis=search_results["analysis"]
-        )
+        html_content = markdown.markdown(search_results["analysis"])
+        return html_content
     except Exception as e:
         logger.error(f"Error processing CNPJ search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -98,13 +104,42 @@ async def view_table():
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
                     query = """
-                    SELECT ra.id, ra.search_type, ra.search_query, ra.ai_analysis, ra.search_datetime
+                    SELECT ra.id, ra.search_type, ra.search_query, ra.search_datetime
                     FROM result_analysis ra
                     ORDER BY ra.search_datetime DESC
                     """
                     await cursor.execute(query)
                     rows = await cursor.fetchall()
         return render_template("view_table.html", rows=rows)
+    except Exception as e:
+        logger.error(f"Error rendering table: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@utility_routes.route("/view-ai-analysis", methods=["GET"])
+async def get_ai_analysis():
+    try:
+        db_config = current_app.config["DB_CONFIG"]
+        id = int(request.args.get("id"))
+
+        async with create_pool(**db_config) as pool:
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """
+                    SELECT ra.ai_analysis
+                    FROM result_analysis ra
+                    WHERE ra.id = %s
+                    """
+                    await cursor.execute(query, (id,))
+                    row = await cursor.fetchone()
+
+                    if not row:
+                        row = "ID não encontrado"
+                    else:
+                        row = row[0]
+
+        html_content = markdown.markdown(row)
+        return render_template("analysis_result.html", analysis=html_content)
     except Exception as e:
         logger.error(f"Error rendering table: {e}")
         return jsonify({"error": str(e)}), 500
