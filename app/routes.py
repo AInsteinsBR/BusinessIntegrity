@@ -11,6 +11,7 @@ from utils import (
     scrape_content,
     similarity_search,
     split_text,
+    validate_cnpj,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,18 +33,33 @@ def register_search_routes(app):
 @search_routes.route("/search", methods=["POST"])
 async def search():
     data = request.json
-    query = data.get("query")
-    if not query:
-        return jsonify({"error": "Query is required"}), 400
+    search_type = data.get("searchType")
+    input_value = data.get("inputValue")
 
+    if not input_value:
+        return jsonify({"error": "Input value is required"}), 400
+
+    if search_type == "query":
+        query = input_value
+        return await process_query_search(query)
+
+    elif search_type == "cnpj":
+        cnpj = input_value
+        if not validate_cnpj(cnpj):
+            return jsonify({"error": "Invalid CNPJ format"}), 400
+        return await process_cnpj_search(cnpj)
+
+    else:
+        return jsonify({"error": "Invalid search type"}), 400
+
+
+async def process_query_search(query):
     try:
-        # Fetch results from SERP API
+
         results = await google_search(query)
 
-        # Scrape content
         scraped_data = await scrape_content(results)
 
-        # Generate embeddings
         embeddings = []
         for url, data in scraped_data.items():
             if data:
@@ -53,15 +69,12 @@ async def search():
                 search_embedding = await create_embeddings(documents)
                 embeddings.extend(search_embedding)
 
-        # Perform analysis
         similar_documents = await similarity_search(query, embeddings, top_n=30)
         reranked_documents = await rerank_documents(query, similar_documents, top_n=15)
         analysis = analyze_text(query, reranked_documents)
 
-        # Store results and analysis in the database
         db_config = current_app.config["DB_CONFIG"]
 
-        # Use async database connection
         async with create_pool(**db_config) as pool:
             async with pool.acquire() as connection:
                 await store_serp_results_with_analysis(
@@ -70,7 +83,16 @@ async def search():
 
         return jsonify({"results": results, "analysis": analysis})
     except Exception as e:
-        logger.error(f"Error processing search: {e}")
+        logger.error(f"Error processing query search: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+async def process_cnpj_search(cnpj):
+    try:
+        cnpj_data = {"cnpj": cnpj, "company_name": "Example Company"}
+        return jsonify({"cnpj_data": cnpj_data})
+    except Exception as e:
+        logger.error(f"Error processing CNPJ search: {e}")
         return jsonify({"error": str(e)}), 500
 
 

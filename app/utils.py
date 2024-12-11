@@ -3,7 +3,7 @@ import io
 import logging
 import os
 import re
-import time
+from time import time
 
 import aiohttp
 import cohere as co
