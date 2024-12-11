@@ -20,7 +20,7 @@ def create_app():
         "host": os.getenv("DB_HOST"),
         "user": os.getenv("DB_USER"),
         "password": os.getenv("DB_PASSWORD"),
-        "database": os.getenv("DB_NAME"),
+        "db": os.getenv("DB_NAME"),
     }
     app.config["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY")
 
