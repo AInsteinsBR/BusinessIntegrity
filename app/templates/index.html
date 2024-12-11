@@ -119,20 +119,21 @@
 
 <body>
     <div class="container">
-        <h1>Search SERP API</h1>
+        <h1>Agente de IA analisador de empresas</h1>
 
         <div class="form-group">
-            <label for="inputValue">Enter your search:</label>
-            <input type="text" id="inputValue" name="inputValue" placeholder="Enter query or CNPJ" required>
+            <label for="inputValue">Digite sua busca:</label>
+            <input type="text" id="inputValue" name="inputValue" placeholder="Digite sua busca ou CNPJ" required>
         </div>
 
-        <button id="searchQueryBtn">Search Query</button>
-        <button id="searchCnpjBtn">Search CNPJ</button>
-        <button id="viewTableBtn">View Table</button>
-        <button id="getLastRowsBtn">Get Last Rows</button>
+        <button id="searchQueryBtn">Buscar</button>
+        <button id="searchCnpjBtn">Buscar CNPJ</button>
+        <button id="viewTableBtn">Ver buscar</button>
+        <button id="getLastRowsBtn">Ver pesquisas no Google</button>
+        <button id="viewAiAnalysisBtn">Ver análise da IA pelo ID</button>
 
         <div id="results">
-            <h2>Results:</h2>
+            <h2>Resultados:</h2>
             <div id="markdownOutput"></div>
         </div>
     </div>
@@ -142,16 +143,17 @@
         const searchCnpjBtn = document.getElementById("searchCnpjBtn");
         const viewTableBtn = document.getElementById("viewTableBtn");
         const getLastRowsBtn = document.getElementById("getLastRowsBtn");
+        const viewAiAnalysisBtn = document.getElementById("viewAiAnalysisBtn");
         const inputValue = document.getElementById("inputValue");
         const markdownOutput = document.getElementById("markdownOutput");
 
         searchQueryBtn.addEventListener("click", async () => {
             const query = inputValue.value;
             if (!query) {
-                markdownOutput.innerHTML = "<p>Please enter a search query.</p>";
+                markdownOutput.innerHTML = "<p>Por favor, insira uma busca.</p>";
                 return;
             }
-            markdownOutput.innerHTML = "<p>Loading...</p>";
+            markdownOutput.innerHTML = "<p>Buscando ...</p>";
             try {
                 const response = await fetch("/search", {
                     method: "POST",
@@ -174,10 +176,10 @@
         searchCnpjBtn.addEventListener("click", async () => {
             const cnpj = inputValue.value;
             if (!cnpj) {
-                markdownOutput.innerHTML = "<p>Please enter a CNPJ.</p>";
+                markdownOutput.innerHTML = "<p>Por favor, insira um CNPJ.</p>";
                 return;
             }
-            markdownOutput.innerHTML = "<p>Loading...</p>";
+            markdownOutput.innerHTML = "<p>Buscando ...</p>";
             try {
                 const response = await fetch("/search", {
                     method: "POST",
@@ -202,13 +204,23 @@
         });
 
         getLastRowsBtn.addEventListener("click", async () => {
-            const limit = prompt("Enter the number of rows to fetch:");
+            const limit = prompt("Entre com o limite de linhas:");
             if (!limit || isNaN(limit) || limit <= 0) {
-                markdownOutput.innerHTML = "<p>Invalid number of rows.</p>";
+                markdownOutput.innerHTML = "<p>Número de linhas inválido.</p>";
                 return;
             }
             window.location.href = `/last-rows?limit=${limit}`;
         });
+
+        viewAiAnalysisBtn.addEventListener("click", () => {
+            const id = prompt("Entre com o ID da análise:");
+            if (!id || isNaN(id) || id <= 0) {
+                markdownOutput.innerHTML = "<p>Por favor, entre com o ID da análise.</p>";
+                return;
+            }
+            window.location.href = `/view-ai-analysis?id=${id}`;
+        });
+
     </script>
 </body>
 
