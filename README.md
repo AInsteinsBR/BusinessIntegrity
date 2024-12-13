@@ -29,12 +29,15 @@
    - Substitua o arquivo `.env-example` por `.env` e preencha as variáveis necessárias.
    - Neste projeto foi utilizado os modelos da Cohere hospeados pela plataforma [cohere](https://cohere.com/).
         - Crie uma conta no site e obtenha a chave `COHERE_API_KEY`.
+   - Para usar o OpenAI, configure a chave `OPENAI_API_KEY`.
+        - Para obter a chave, acesse: [openai.com](https://openai.com/)
    - Para buscar nas páginas do Google, configure a chave `SERPER_API_KEY`.
         - Para obter a chave, acesse: [serper.dev](https://serper.dev/)
    - Passe as informações do seu banco de dados MySQL para o arquivo `.env`
    - Exporte as variáveis de ambiente:
         ```bash
         export COHERE_API_KEY=...
+        export OPENAI_API_KEY=...
         export SERPER_API_KEY=...
         export DB_HOST=...
         export DB_USER=...
@@ -42,7 +45,7 @@
         export DB_NAME=...
         ```
 
-5. [OPCIONAL] Para criar as tabelas no banco de dados, execute:
+5. Para criar as tabelas no banco de dados, execute:
     ```bash
     python3 config.py
     ```
