@@ -10,6 +10,7 @@ import cohere as co
 import numpy as np
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from openai import OpenAI
 from PyPDF2 import PdfReader
 from requests_html import HTMLSession
 
@@ -17,9 +18,12 @@ logger = logging.getLogger(__name__)
 
 SERP_API_KEY = os.getenv("SERPER_API_KEY")
 COHERE_API_KEY = os.getenv("COHERE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
-cohere_client = co.ClientV2(COHERE_API_KEY)
+cohere_client = co.ClientV2(api_key=COHERE_API_KEY)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
 session = HTMLSession()
 
 system_message = """You will analyze a collection of documents to determine if a company is involved in corruption or fraud schemes based on either their fantasy name or CNPJ (Brazilian company registration number). 
@@ -85,21 +89,28 @@ Begin your analysis now.
 """
 
 
+def format_user_message(query, documents):
+    user_message = "<documents>\n"
+    for index, document in enumerate(documents, start=1):
+        user_message += f"<document {index}>\n{document}\n</document {index}>\n"
+    user_message += "</documents>\n\n"
+
+    return user_message + "User query: " + query
+
+
 def analyze_text(query, documents):
-    response = cohere_client.chat(
-        model="command-r-plus-08-2024",
+
+    user_message = format_user_message(query, documents)
+
+    completion = openai_client.chat.completions.create(
+        model="gpt-4o-mini-2024-07-18",
         messages=[
             {"role": "system", "content": system_message},
-            {
-                "role": "user",
-                "content": query,
-            },
+            {"role": "user", "content": user_message},
         ],
-        documents=documents,
-        temperature=0.3,
     )
 
-    return response.message.content[0].text
+    return completion.choices[0].message.content
 
 
 def split_text(texts, chunk_size=512):
@@ -129,55 +140,49 @@ async def create_embeddings(
     texts_embeddings = []
     request_times = []  # Track the timestamps of recent requests
 
-    for i in range(0, len(texts), 96):
-        retries = 0
-        success = False
+    retries = 0
+    success = False
 
-        while not success and retries < max_retries:
-            try:
-                # Enforce rate limiting
-                current_time = time()
-                # Remove timestamps outside the rate period
-                request_times = [
-                    t for t in request_times if current_time - t < rate_period
-                ]
-                if len(request_times) >= rate_limit:
-                    # Calculate wait time until a slot becomes available
-                    wait_time = rate_period - (current_time - request_times[0])
-                    logger.info(
-                        f"Rate limit reached. Waiting {wait_time:.2f} seconds..."
-                    )
-                    await asyncio.sleep(wait_time)
+    while not success and retries < max_retries:
+        try:
+            current_time = time()
+            request_times = [t for t in request_times if current_time - t < rate_period]
 
-                # Wrap synchronous cohere call in a coroutine
-                results = await asyncio.to_thread(
-                    cohere_client.embed,
-                    model="embed-multilingual-v3.0",
-                    input_type="search_document",
-                    texts=texts[i : i + 96],
-                    embedding_types=["float"],
+            if len(request_times) >= rate_limit:
+                wait_time = rate_period - (current_time - request_times[0])
+                logger.info(f"Rate limit reached. Waiting {wait_time:.2f} seconds...")
+                await asyncio.sleep(wait_time)
+
+            # Wrap synchronous cohere call in a coroutine
+            results = await asyncio.to_thread(
+                openai_client.embeddings.create,
+                model="text-embedding-3-large",
+                input=texts,
+                encoding_format="float",
+            )
+            for text, embeddings in zip(texts, results.data):
+                texts_embeddings.append(
+                    {"text": text, "embedding": embeddings.embedding}
                 )
-                for text, embeddings in zip(results.texts, results.embeddings.float):
-                    texts_embeddings.append({"text": text, "embedding": embeddings})
 
-                # Log the request timestamp
-                request_times.append(time())
+            # Log the request timestamp
+            request_times.append(time())
 
-                success = True
-            except Exception as e:
-                if hasattr(e, "status_code") and e.status_code == 429:
-                    retries += 1
-                    wait_time = initial_wait * (backoff_factor**retries)
-                    logger.warning(
-                        f"Rate limit hit. Retrying in {wait_time:.2f} seconds... (Retry {retries}/{max_retries})"
-                    )
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"Error generating embeddings: {e}")
-                    raise e
-                if retries >= max_retries:
-                    logger.warning("Max retries reached. Skipping current request.")
-                    break
+            success = True
+        except Exception as e:
+            if hasattr(e, "status_code") and e.status_code == 429:
+                retries += 1
+                wait_time = initial_wait * (backoff_factor**retries)
+                logger.warning(
+                    f"Rate limit hit. Retrying in {wait_time:.2f} seconds... (Retry {retries}/{max_retries})"
+                )
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(f"Error generating embeddings: {e}")
+                raise e
+            if retries >= max_retries:
+                logger.warning("Max retries reached. Skipping current request.")
+                break
 
     return texts_embeddings
 
@@ -191,14 +196,13 @@ async def similarity_search(query, texts_embeddings, top_n=20):
 
     # Wrap synchronous embedding generation in a coroutine
     query_embedding = await asyncio.to_thread(
-        cohere_client.embed,
-        model="embed-multilingual-v3.0",
-        input_type="search_query",
-        texts=[query],
-        embedding_types=["float"],
+        openai_client.embeddings.create,
+        model="text-embedding-3-large",
+        input=query,
+        encoding_format="float",
     )
 
-    query_embedding = query_embedding.embeddings.float[0]
+    query_embedding = query_embedding.data[0].embedding
     similarities = np.array(
         [
             cosine_similarity(query_embedding, emb["embedding"])
