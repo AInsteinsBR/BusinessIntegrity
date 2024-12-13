@@ -3,16 +3,18 @@ import io
 import logging
 import os
 import re
+from io import BytesIO
 from time import time
 
 import aiohttp
 import cohere as co
 import numpy as np
-from bs4 import BeautifulSoup
+from docx import Document
+from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
 from PyPDF2 import PdfReader
-from requests_html import HTMLSession
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +25,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 cohere_client = co.ClientV2(api_key=COHERE_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-session = HTMLSession()
 
 system_message = """You will analyze a collection of documents to determine if a company is involved in corruption or fraud schemes based on either their fantasy name or CNPJ (Brazilian company registration number). 
 
@@ -59,10 +59,10 @@ Explain the logic behind your conclusion, including:
 
 <conclusion>
 State whether there is:
-[EVIDÊNCIA DE CORRUPÇÃO]: Strong evidence of corruption/fraud found
-[ATIVIDADE SUSPEITA]: Some suspicious patterns but inconclusive evidence
-[SEM EVIDÊNCIA]: No significant evidence of corruption/fraud
-[DADOS INSUFICIENTES]: Not enough information to make a determination
+[EVIDÊNCIA DE CORRUPÇÃO]
+[ATIVIDADE SUSPEITA]
+[SEM EVIDÊNCIA]
+[DADOS INSUFICIENTES]
 </conclusion>
 
 Important rules:
@@ -92,7 +92,7 @@ Begin your analysis now.
 def format_user_message(query, documents):
     user_message = "<documents>\n"
     for index, document in enumerate(documents, start=1):
-        user_message += f"<document {index}>\n{document}\n</document {index}>\n"
+        user_message += f"<document {index}>\n{document.strip()}\n</document {index}>\n"
     user_message += "</documents>\n\n"
 
     return user_message + "User query: " + query
@@ -101,6 +101,8 @@ def format_user_message(query, documents):
 def analyze_text(query, documents):
 
     user_message = format_user_message(query, documents)
+
+    print(user_message)
 
     completion = openai_client.chat.completions.create(
         model="gpt-4o-mini-2024-07-18",
@@ -113,7 +115,7 @@ def analyze_text(query, documents):
     return completion.choices[0].message.content
 
 
-def split_text(texts, chunk_size=512):
+def split_text(texts, chunk_size=1024):
     """
     Split the text into chunks of a specified size.
     """
@@ -129,96 +131,57 @@ def split_text(texts, chunk_size=512):
     return [doc.page_content for doc in documents]
 
 
-async def create_embeddings(
+def create_embeddings(
     texts,
-    max_retries=10,
-    backoff_factor=2,
-    initial_wait=1,
-    rate_limit=100,
-    rate_period=60,
 ):
     texts_embeddings = []
-    request_times = []  # Track the timestamps of recent requests
 
-    retries = 0
-    success = False
-
-    while not success and retries < max_retries:
-        try:
-            current_time = time()
-            request_times = [t for t in request_times if current_time - t < rate_period]
-
-            if len(request_times) >= rate_limit:
-                wait_time = rate_period - (current_time - request_times[0])
-                logger.info(f"Rate limit reached. Waiting {wait_time:.2f} seconds...")
-                await asyncio.sleep(wait_time)
-
-            # Wrap synchronous cohere call in a coroutine
-            results = await asyncio.to_thread(
-                openai_client.embeddings.create,
-                model="text-embedding-3-large",
-                input=texts,
-                encoding_format="float",
-            )
-            for text, embeddings in zip(texts, results.data):
-                texts_embeddings.append(
-                    {"text": text, "embedding": embeddings.embedding}
-                )
-
-            # Log the request timestamp
-            request_times.append(time())
-
-            success = True
-        except Exception as e:
-            if hasattr(e, "status_code") and e.status_code == 429:
-                retries += 1
-                wait_time = initial_wait * (backoff_factor**retries)
-                logger.warning(
-                    f"Rate limit hit. Retrying in {wait_time:.2f} seconds... (Retry {retries}/{max_retries})"
-                )
-                await asyncio.sleep(wait_time)
-            else:
-                logger.error(f"Error generating embeddings: {e}")
-                raise e
-            if retries >= max_retries:
-                logger.warning("Max retries reached. Skipping current request.")
-                break
+    results = openai_client.embeddings.create(
+        model="text-embedding-3-large",
+        input=texts,
+        encoding_format="float",
+    )
+    for text, embeddings in zip(texts, results.data):
+        texts_embeddings.append({"text": text, "embedding": embeddings.embedding})
 
     return texts_embeddings
 
 
-async def similarity_search(query, texts_embeddings, top_n=20):
+def similarity_search(query, texts_embeddings, top_n=20):
     def cosine_similarity(a, b):
         dot_product = np.dot(a, b)
         norm_a = np.linalg.norm(a)
         norm_b = np.linalg.norm(b)
         return dot_product / (norm_a * norm_b)
 
-    # Wrap synchronous embedding generation in a coroutine
-    query_embedding = await asyncio.to_thread(
-        openai_client.embeddings.create,
-        model="text-embedding-3-large",
-        input=query,
-        encoding_format="float",
-    )
+    results = []
+    common_words = ["Corrupção", "Fraude", "Suborno", "Escandalos", "Multas"]
 
-    query_embedding = query_embedding.data[0].embedding
-    similarities = np.array(
-        [
-            cosine_similarity(query_embedding, emb["embedding"])
-            for emb in texts_embeddings
-        ]
-    )
+    for word in common_words:
+        query_embedding = openai_client.embeddings.create(
+            model="text-embedding-3-large",
+            input=query + " " + word,
+            encoding_format="float",
+        )
 
-    top_n_indices = similarities.argsort()[-top_n:][::-1]
-    results = [texts_embeddings[i]["text"] for i in top_n_indices]
+        query_embedding = query_embedding.data[0].embedding
+        similarities = np.array(
+            [
+                cosine_similarity(query_embedding, emb["embedding"])
+                for emb in texts_embeddings
+            ]
+        )
+
+        top_n_indices = similarities.argsort()[-top_n:][::-1]
+        results.extend([texts_embeddings[i]["text"] for i in top_n_indices])
+
+    results = list(set(results))
 
     return results
 
 
-async def rerank_documents(query, documents, top_n=10):
-    response = await asyncio.to_thread(
-        cohere_client.rerank,
+def rerank_documents(query, documents, top_n=10):
+    response = cohere_client.rerank(
         model="rerank-v3.5",
         query=query,
         documents=documents,
@@ -229,27 +192,28 @@ async def rerank_documents(query, documents, top_n=10):
     return reranked_documents
 
 
-async def google_search(query):
-    headers = {
-        "X-API-KEY": SERP_API_KEY,
-        "Content-Type": "application/json",
-    }
-    params = {"q": query, "gl": "br", "hl": "pt-br", "num": 10}
+def google_search(query):
+    results = []
+    seen_links = set()
 
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(
-                "https://google.serper.dev/search", headers=headers, json=params
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return data.get("organic", [])
-        except aiohttp.ClientError as e:
-            logger.error(f"Error in SERP API request: {e}")
-            raise
+    search = GoogleSerperAPIWrapper(serper_api_key=SERP_API_KEY)
+    search.gl = "br"
+    search.hl = "pt-br"
+    search.k = 10
+
+    common_words = ["Corrupção", "Fraude", "Suborno", "Escandalos", "Multas"]
+    for word in common_words:
+        result = search.results(query + " " + word)
+        if result["organic"]:
+            for item in result["organic"]:
+                if item["link"] not in seen_links:
+                    results.append(item)
+                    seen_links.add(item["link"])
+
+    return results
 
 
-async def extract_text_from_pdf(pdf_data):
+def extract_text_from_pdf(pdf_data):
     try:
         pdf_reader = PdfReader(io.BytesIO(pdf_data))
         return "\n".join(
@@ -260,14 +224,19 @@ async def extract_text_from_pdf(pdf_data):
         return None
 
 
-async def extract_text_from_html(response):
-    try:
-        html = await response.text()
-        soup = BeautifulSoup(html, "html.parser")
-        return soup.get_text()
-    except Exception as e:
-        logger.error(f"HTML extraction error: {e}")
+def extract_text_from_doc(doc_content, content_type):
+    if "wordprocessingml.document" in content_type:
+        doc = Document(BytesIO(doc_content))
+        return "\n".join([paragraph.text for paragraph in doc.paragraphs])
+    else:
+        logger.error("Unsupported document type")
         return None
+
+
+def extract_text_from_html(url):
+    loader = WebBaseLoader(url)
+    docs = loader.load()
+    return docs[0].page_content
 
 
 async def scrape_content(search_results):
@@ -281,17 +250,26 @@ async def scrape_content(search_results):
             try:
                 async with session.get(url) as response:
                     content_type = response.headers.get("Content-Type", "").lower()
+                    logger.info(f"Content-Type: {content_type}")
                     if "pdf" in content_type:
                         pdf_content = await response.read()
-                        text = await extract_text_from_pdf(pdf_content)
+                        text = extract_text_from_pdf(pdf_content)
                     elif "html" in content_type:
-                        text = await extract_text_from_html(response)
+                        text = extract_text_from_html(url)
+                    elif (
+                        "msword" in content_type
+                        or "wordprocessingml.document" in content_type
+                    ):
+                        doc_content = await response.read()
+                        text = extract_text_from_doc(doc_content, content_type)
+
                     else:
                         text = None
                     scraped_data[url] = {"title": title, "text": text}
             except Exception as e:
                 logger.error(f"Error scraping {url}: {e}")
                 scraped_data[url] = None
+
     return scraped_data
 
 
@@ -302,7 +280,10 @@ def validate_cnpj(cnpj):
 
 
 async def run_search(query):
-    results = await google_search(query)
+    results = google_search(query)
+
+    if not results:
+        return None
 
     scraped_data = await scrape_content(results)
 
@@ -312,11 +293,11 @@ async def run_search(query):
             logger.info(f"URL: {url}")
             logger.info(f"Title: {data['title']}")
             documents = split_text(data["text"])
-            search_embedding = await create_embeddings(documents)
+            search_embedding = create_embeddings(documents)
             embeddings.extend(search_embedding)
 
-    similar_documents = await similarity_search(query, embeddings, top_n=30)
-    reranked_documents = await rerank_documents(query, similar_documents, top_n=15)
+    similar_documents = similarity_search(query, embeddings, top_n=30)
+    reranked_documents = rerank_documents(query, similar_documents, top_n=15)
     analysis = analyze_text(query, reranked_documents)
 
     return {"results": results, "analysis": analysis}
