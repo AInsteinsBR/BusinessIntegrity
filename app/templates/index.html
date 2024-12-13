@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search SERP API</title>
+    <title>Validação de Empresa com IA</title>
     <style>
         * {
             box-sizing: border-box;
@@ -18,7 +18,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             padding: 20px;
             color: #333;
         }
@@ -36,7 +36,7 @@
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
             width: 100%;
-            max-width: 500px;
+            max-width: 600px;
         }
 
         label {
@@ -119,18 +119,18 @@
 
 <body>
     <div class="container">
-        <h1>Agente de IA analisador de empresas</h1>
+        <h1>Validação de Empresa com IA</h1>
 
         <div class="form-group">
             <label for="inputValue">Digite sua busca:</label>
             <input type="text" id="inputValue" name="inputValue" placeholder="Digite sua busca ou CNPJ" required>
         </div>
 
-        <button id="searchQueryBtn">Buscar</button>
-        <button id="searchCnpjBtn">Buscar CNPJ</button>
-        <button id="viewTableBtn">Ver buscas</button>
-        <button id="getLastRowsBtn">Ver pesquisas no Google</button>
-        <button id="viewAiAnalysisBtn">Ver análise da IA pelo ID</button>
+        <button id="searchQueryBtn">Buscar por Consulta</button>
+        <button id="searchCnpjBtn">Buscar por CNPJ</button>
+        <button id="viewTableBtn">Ver Tabela de Buscas</button>
+        <button id="getLastRowsBtn">Ver Links da Busca</button>
+        <button id="viewAiAnalysisBtn">Ver Análise da IA</button>
 
         <div id="results">
             <h2>Resultados:</h2>
@@ -147,37 +147,45 @@
         const inputValue = document.getElementById("inputValue");
         const markdownOutput = document.getElementById("markdownOutput");
 
+        async function fetchData(url, method, body = null) {
+            try {
+                const options = {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                };
+
+                if (body) options.body = JSON.stringify(body);
+
+                const response = await fetch(url, options);
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.statusText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                return { error: error.message };
+            }
+        }
+
         searchQueryBtn.addEventListener("click", async () => {
             const query = inputValue.value;
             if (!query) {
                 markdownOutput.innerHTML = "<p>Por favor, insira uma busca.</p>";
                 return;
             }
-            markdownOutput.innerHTML = "<p>Buscando ...</p>";
-            try {
-                const response = await fetch("/search", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ searchType: "query", inputValue: query }),
-                });
+            markdownOutput.innerHTML = "<p>Buscando...</p>";
 
-                if (!response.ok) {
-                    markdownOutput.innerHTML = `<p style="color: red;">Server error: ${response.statusText}</p>`;
-                    return;
-                }
+            const data = await fetchData("/search", "POST", {
+                searchType: "query",
+                inputValue: query,
+            });
 
-                const data = await response.json();
-                if (data.error) {
-                    markdownOutput.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
-                } else {
-                    markdownOutput.innerHTML = data.analysis; // Render markdown as HTML
-                }
-            } catch (error) {
-                markdownOutput.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            if (data.error) {
+                markdownOutput.innerHTML = `<p style="color: red;">Erro: ${data.error}</p>`;
+            } else {
+                markdownOutput.innerHTML = `<p style="color: green;">${data.Status}</p>`;
             }
-
         });
 
         searchCnpjBtn.addEventListener("click", async () => {
@@ -186,23 +194,17 @@
                 markdownOutput.innerHTML = "<p>Por favor, insira um CNPJ.</p>";
                 return;
             }
-            markdownOutput.innerHTML = "<p>Buscando ...</p>";
-            try {
-                const response = await fetch("/search", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ searchType: "cnpj", inputValue: cnpj }),
-                });
-                const data = await response.json();
-                if (data.error) {
-                    markdownOutput.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
-                } else {
-                    markdownOutput.innerHTML = data.analysis; // Render markdown as HTML
-                }
-            } catch (error) {
-                markdownOutput.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            markdownOutput.innerHTML = "<p>Buscando...</p>";
+
+            const data = await fetchData("/search", "POST", {
+                searchType: "cnpj",
+                inputValue: cnpj,
+            });
+
+            if (data.error) {
+                markdownOutput.innerHTML = `<p style="color: red;">Erro: ${data.error}</p>`;
+            } else {
+                markdownOutput.innerHTML = `<p style="color: green;">${data.Status}</p>`;
             }
         });
 
@@ -210,24 +212,23 @@
             window.location.href = "/view-table";
         });
 
-        getLastRowsBtn.addEventListener("click", async () => {
-            const limit = prompt("Entre com o limite de linhas:");
-            if (!limit || isNaN(limit) || limit <= 0) {
-                markdownOutput.innerHTML = "<p>Número de linhas inválido.</p>";
+        getLastRowsBtn.addEventListener("click", () => {
+            const id = prompt("Digite o ID da análise:");
+            if (!id || isNaN(id) || id <= 0) {
+                markdownOutput.innerHTML = "<p>Limite inválido.</p>";
                 return;
             }
-            window.location.href = `/last-rows?limit=${limit}`;
+            window.location.href = `/last-rows?id=${id}`;
         });
 
         viewAiAnalysisBtn.addEventListener("click", () => {
-            const id = prompt("Entre com o ID da análise:");
+            const id = prompt("Digite o ID da análise:");
             if (!id || isNaN(id) || id <= 0) {
-                markdownOutput.innerHTML = "<p>Por favor, entre com o ID da análise.</p>";
+                markdownOutput.innerHTML = "<p>ID inválido.</p>";
                 return;
             }
             window.location.href = `/view-ai-analysis?id=${id}`;
         });
-
     </script>
 </body>
 

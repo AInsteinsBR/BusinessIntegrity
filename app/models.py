@@ -36,3 +36,5 @@ async def store_serp_results_with_analysis(
             await cursor.execute(serp_query, data)
 
         await connection.commit()
+
+        return analysis_id

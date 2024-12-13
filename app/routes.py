@@ -34,15 +34,15 @@ async def search():
     try:
         if search_type == "query":
             query = input_value
-            html_content = await process_query_search(query)
-            return jsonify({"analysis": html_content})
+            analysis_id = await process_query_search(query)
+            return jsonify({"Status": f"Análise concluída com ID: {analysis_id}"})
 
         elif search_type == "cnpj":
             cnpj = input_value
             if not validate_cnpj(cnpj):
                 return jsonify({"error": "Invalid CNPJ format"}), 400
-            html_content = await process_cnpj_search(cnpj)
-            return jsonify({"analysis": html_content})
+            analysis_id = await process_cnpj_search(cnpj)
+            return jsonify({"Status": f"Análise concluída com ID: {analysis_id}"})
 
         else:
             return jsonify({"error": "Invalid search type"}), 400
@@ -55,10 +55,8 @@ async def search():
 async def process_query_search(query):
     try:
         search_results = await run_search(query)
-        await insert_search_results("QUERY", query, search_results)
-
-        html_content = markdown.markdown(search_results["analysis"])
-        return html_content
+        analysis_id = await insert_search_results("QUERY", query, search_results)
+        return analysis_id
     except Exception as e:
         logger.error(f"Error processing query search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -68,10 +66,8 @@ async def process_cnpj_search(cnpj):
     try:
         query = f"empresa {cnpj}"
         search_results = await run_search(query)
-        await insert_search_results("CNPJ", cnpj, search_results)
-
-        html_content = markdown.markdown(search_results["analysis"])
-        return html_content
+        analysis_id = await insert_search_results("CNPJ", cnpj, search_results)
+        return analysis_id
     except Exception as e:
         logger.error(f"Error processing CNPJ search: {e}")
         return jsonify({"error": str(e)}), 500
@@ -81,13 +77,14 @@ async def insert_search_results(query_type, query, search_results):
     db_config = current_app.config["DB_CONFIG"]
     async with create_pool(**db_config) as pool:
         async with pool.acquire() as connection:
-            await store_serp_results_with_analysis(
+            analysis_id = await store_serp_results_with_analysis(
                 connection,
                 query_type,
                 query,
                 search_results["results"],
                 search_results["analysis"],
             )
+            return analysis_id
 
 
 @utility_routes.route("/")
@@ -149,7 +146,7 @@ async def get_ai_analysis():
 async def get_last_rows():
     try:
         db_config = current_app.config["DB_CONFIG"]
-        row_limit = int(request.args.get("limit", 10))
+        id = int(request.args.get("id", 10))
 
         async with create_pool(**db_config) as pool:
             async with pool.acquire() as connection:
@@ -158,10 +155,10 @@ async def get_last_rows():
                     SELECT sr.*
                     FROM serp_results sr 
                     JOIN result_analysis ra ON sr.analysis_id = ra.id 
+                    WHERE sr.analysis_id = %s
                     ORDER BY ra.search_datetime DESC
-                    LIMIT %s
                     """
-                    await cursor.execute(query, (row_limit,))
+                    await cursor.execute(query, (id,))
                     rows = await cursor.fetchall()
         return render_template("view_rows.html", rows=rows)
     except Exception as e:
