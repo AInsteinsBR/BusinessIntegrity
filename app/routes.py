@@ -35,6 +35,8 @@ async def search():
         if search_type == "query":
             query = input_value
             analysis_id = await process_query_search(query)
+            if analysis_id is None:
+                return jsonify({"error": "No results found"})
             return jsonify({"Status": f"Análise concluída com ID: {analysis_id}"})
 
         elif search_type == "cnpj":
@@ -42,6 +44,8 @@ async def search():
             if not validate_cnpj(cnpj):
                 return jsonify({"error": "Invalid CNPJ format"}), 400
             analysis_id = await process_cnpj_search(cnpj)
+            if analysis_id is None:
+                return jsonify({"error": "No results found"})
             return jsonify({"Status": f"Análise concluída com ID: {analysis_id}"})
 
         else:
@@ -55,8 +59,11 @@ async def search():
 async def process_query_search(query):
     try:
         search_results = await run_search(query)
-        analysis_id = await insert_search_results("QUERY", query, search_results)
-        return analysis_id
+        if search_results:
+            analysis_id = await insert_search_results("QUERY", query, search_results)
+            return analysis_id
+        else:
+            return None
     except Exception as e:
         logger.error(f"Error processing query search: {e}")
         return jsonify({"error": str(e)}), 500
