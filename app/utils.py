@@ -6,6 +6,7 @@ import uuid
 from io import BytesIO
 
 import aiohttp
+import chromadb
 import cohere as co
 import docx
 from langchain_chroma import Chroma
@@ -140,6 +141,8 @@ def split_text(texts, chunk_size=1024):
 
 
 def create_vector_store(documents):
+    chromadb.api.client.SharedSystemClient.clear_system_cache()
+
     vector_store = Chroma(
         embedding_function=open_ai_embeddings,
     )
