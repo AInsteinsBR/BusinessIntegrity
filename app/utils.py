@@ -1,22 +1,28 @@
-import asyncio
 import io
 import logging
 import os
 import re
+import uuid
 from io import BytesIO
-from time import time
 
 import aiohttp
 import cohere as co
-import numpy as np
-from docx import Document
+import docx
+from langchain_chroma import Chroma
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain_core.documents import Document
+from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
 from PyPDF2 import PdfReader
 
 logger = logging.getLogger(__name__)
+
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 SERP_API_KEY = os.getenv("SERPER_API_KEY")
 COHERE_API_KEY = os.getenv("COHERE_API_KEY")
@@ -25,6 +31,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 cohere_client = co.ClientV2(api_key=COHERE_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+open_ai_embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-large", openai_api_key=OPENAI_API_KEY
+)
 
 system_message = """You will analyze a collection of documents to determine if a company is involved in corruption or fraud schemes based on either their fantasy name or CNPJ (Brazilian company registration number). 
 
@@ -103,7 +112,6 @@ def analyze_text(query, documents):
     user_message = format_user_message(query, documents)
 
     print(user_message)
-
     completion = openai_client.chat.completions.create(
         model="gpt-4o-mini-2024-07-18",
         messages=[
@@ -131,64 +139,53 @@ def split_text(texts, chunk_size=1024):
     return [doc.page_content for doc in documents]
 
 
-def create_embeddings(
-    texts,
-):
-    texts_embeddings = []
-
-    results = openai_client.embeddings.create(
-        model="text-embedding-3-large",
-        input=texts,
-        encoding_format="float",
+def create_vector_store(documents):
+    vector_store = Chroma(
+        embedding_function=open_ai_embeddings,
     )
-    for text, embeddings in zip(texts, results.data):
-        texts_embeddings.append({"text": text, "embedding": embeddings.embedding})
 
-    return texts_embeddings
+    langchain_documents = []
+    for i, document in enumerate(documents):
+        langchain_documents.append(Document(page_content=document, id=i))
+
+    uuids = [str(uuid.uuid4()) for _ in range(len(documents))]
+    vector_store.add_documents(documents=langchain_documents, ids=uuids)
+    return vector_store
 
 
-def similarity_search(query, texts_embeddings, top_n=20):
-    def cosine_similarity(a, b):
-        dot_product = np.dot(a, b)
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
-        return dot_product / (norm_a * norm_b)
+def similarity_search(query, vector_store, top_n=20):
 
     results = []
     common_words = ["Corrupção", "Fraude", "Suborno", "Escandalos", "Multas"]
 
-    for word in common_words:
-        query_embedding = openai_client.embeddings.create(
-            model="text-embedding-3-large",
-            input=query + " " + word,
-            encoding_format="float",
-        )
+    queries = [query + " " + word for word in common_words]
 
-        query_embedding = query_embedding.data[0].embedding
-        similarities = np.array(
-            [
-                cosine_similarity(query_embedding, emb["embedding"])
-                for emb in texts_embeddings
-            ]
-        )
+    for query in queries:
+        documents = vector_store.similarity_search(query, k=top_n)
+        results.extend(documents)
 
-        top_n_indices = similarities.argsort()[-top_n:][::-1]
-        results.extend([texts_embeddings[i]["text"] for i in top_n_indices])
-
-    results = list(set(results))
+    results = list(set([doc.page_content for doc in results]))
 
     return results
 
 
 def rerank_documents(query, documents, top_n=10):
-    response = cohere_client.rerank(
-        model="rerank-v3.5",
-        query=query,
-        documents=documents,
-        top_n=top_n,
-    )
+    common_words = ["Corrupção", "Fraude", "Suborno", "Escandalos", "Multas"]
+    queries = [query + " " + word for word in common_words]
 
-    reranked_documents = [documents[result.index] for result in response.results]
+    indexes = []
+    for query in queries:
+        response = cohere_client.rerank(
+            model="rerank-v3.5",
+            query=query,
+            documents=documents,
+            top_n=top_n,
+        )
+        indexes.extend([result.index for result in response.results])
+
+    indexes = list(set(indexes))
+
+    reranked_documents = [documents[index] for index in indexes]
     return reranked_documents
 
 
@@ -199,7 +196,7 @@ def google_search(query):
     search = GoogleSerperAPIWrapper(serper_api_key=SERP_API_KEY)
     search.gl = "br"
     search.hl = "pt-br"
-    search.k = 10
+    search.k = 5
 
     common_words = ["Corrupção", "Fraude", "Suborno", "Escandalos", "Multas"]
     for word in common_words:
@@ -226,7 +223,7 @@ def extract_text_from_pdf(pdf_data):
 
 def extract_text_from_doc(doc_content, content_type):
     if "wordprocessingml.document" in content_type:
-        doc = Document(BytesIO(doc_content))
+        doc = docx.Document(BytesIO(doc_content))
         return "\n".join([paragraph.text for paragraph in doc.paragraphs])
     else:
         logger.error("Unsupported document type")
@@ -250,19 +247,23 @@ async def scrape_content(search_results):
             try:
                 async with session.get(url) as response:
                     content_type = response.headers.get("Content-Type", "").lower()
-                    logger.info(f"Content-Type: {content_type}")
+                    logger.info(
+                        f"""
+                    URL: {url}
+                    Title: {title}
+                    """
+                    )
                     if "pdf" in content_type:
-                        pdf_content = await response.read()
-                        text = extract_text_from_pdf(pdf_content)
+                        content = await response.read()
+                        text = extract_text_from_pdf(content)
                     elif "html" in content_type:
                         text = extract_text_from_html(url)
                     elif (
                         "msword" in content_type
                         or "wordprocessingml.document" in content_type
                     ):
-                        doc_content = await response.read()
-                        text = extract_text_from_doc(doc_content, content_type)
-
+                        content = await response.read()
+                        text = extract_text_from_doc(content, content_type)
                     else:
                         text = None
                     scraped_data[url] = {"title": title, "text": text}
@@ -287,35 +288,18 @@ async def run_search(query):
 
     scraped_data = await scrape_content(results)
 
-    embeddings = []
+    documents = []
     for url, data in scraped_data.items():
-        if data:
-            logger.info(f"URL: {url}")
+        logger.info(f"URL: {url}")
+        if data and data["text"]:
             logger.info(f"Title: {data['title']}")
-            documents = split_text(data["text"])
-            search_embedding = create_embeddings(documents)
-            embeddings.extend(search_embedding)
+            documents.extend(split_text(data["text"]))
+            continue
+        logger.info(f"No text found for URL: {url}")
 
-    similar_documents = similarity_search(query, embeddings, top_n=30)
-    reranked_documents = rerank_documents(query, similar_documents, top_n=15)
+    vector_store = create_vector_store(documents)
+    similiar_documents = similarity_search(query, vector_store, top_n=30)
+    reranked_documents = rerank_documents(query, similiar_documents, top_n=15)
     analysis = analyze_text(query, reranked_documents)
 
     return {"results": results, "analysis": analysis}
-
-
-# if __name__ == "__main__":
-#     query = "AJEL MONTAGEM E AUTOMACAO INDUSTRIAL LTDA fraude"
-#     results = google_search(query)
-#     scraped_data = scrape_content(results)
-#     embeddings = []
-#     for url, data in scraped_data.items():
-#         if data:
-#             logger.info(f"URL: {url}")
-#             logger.info(f"Title: {data['title']}")
-#             documents = split_text(data["text"])
-#             search_embedding = create_embeddings(documents)
-#             embeddings.extend(search_embedding)
-
-#     similiar_documents = similarity_search(query, embeddings, top_n=30)
-#     reranked_documents = rerank_documents(query, similiar_documents, top_n=15)
-#     analysis = analyze_text(query, reranked_documents)
