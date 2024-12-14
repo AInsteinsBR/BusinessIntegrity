@@ -52,6 +52,6 @@
 
 5. Execute a aplicação de demonstração:
    ```bash
-   EXPORT FLASK_APP=app/app.py
+   export FLASK_APP=app/app.py
    flask run
    ```
