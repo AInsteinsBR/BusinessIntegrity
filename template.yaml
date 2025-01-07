@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM template for deploying web application on EC2 with RDS MySQL (Free Tier compatible)
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+    Description: EC2 instance type (Free Tier eligible)
+  CohereApiKey:
+    Type: String
+    NoEcho: true
+    Description: API Key for Cohere
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: API Key for OpenAI
+  SerperApiKey:
+    Type: String
+    NoEcho: true
+    Description: API Key for Serper
+  DBName:
+    Type: String
+    Description: Database name
+    Default: businessintegrity
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters
+  DBUser:
+    Type: String
+    Description: Database admin username
+    Default: admin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Database admin password
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9]+'
+    ConstraintDescription: Must contain only alphanumeric characters
+  DBInstanceClass:
+    Type: String
+    Default: db.t2.micro
+    AllowedValues:
+      - db.t2.micro
+    Description: Database instance class (Free Tier eligible)
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnet1
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet1
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicRouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: !Sub '${AWS::StackName}-key'
+
+  WebAppInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: AttachGateway
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: ami-0c7217cdde317cfec  # Amazon Linux 2023 AMI (us-east-1)
+      KeyName: !Ref EC2KeyPair
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds: 
+        - !Ref WebAppSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y python3 python3-pip git
+          cd /home/ec2-user
+          git clone https://github.com/AInsteinsBR/BusinessIntegrity.git
+          cd BusinessIntegrity
+
+          # Create .env file with environment variables
+          cat > .env << EOL
+          COHERE_API_KEY=${CohereApiKey}
+          OPENAI_API_KEY=${OpenAIApiKey}
+          SERPER_API_KEY=${SerperApiKey}
+          DB_HOST=${MySQLDatabase.Endpoint.Address}
+          DB_USER=${DBUser}
+          DB_PASSWORD=${DBPassword}
+          DB_NAME=${DBName}
+          EOL
+
+          pip3 install -r requirements.txt
+          python3 -m venv venv
+          source venv/bin/activate
+          python3 config.py
+          
+          # Create and configure systemd service
+          cat > /etc/systemd/system/flaskapp.service << EOL
+          [Unit]
+          Description=Flask App Service
+          After=network.target
+
+          [Service]
+          User=ec2-user
+          WorkingDirectory=/home/ec2-user/BusinessIntegrity
+          Environment="PATH=/home/ec2-user/BusinessIntegrity/venv/bin"
+          ExecStart=/home/ec2-user/BusinessIntegrity/venv/bin/python3 app.py
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+          EOL
+
+          systemctl enable flaskapp
+          systemctl start flaskapp
+
+  WebAppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP/HTTPS access and SSH
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable MySQL access from EC2
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebAppSecurityGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+
+  MySQLDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DBName
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: '20'
+      VPCSecurityGroups: 
+        - !GetAtt DBSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      StorageType: gp2  # Changed to gp2 as it's included in free tier
+    DeletionPolicy: Snapshot
+
+Outputs:
+  WebsiteURL:
+    Description: URL for the deployed web application
+    Value: !Sub http://${WebAppInstance.PublicDnsName}
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt WebAppInstance.PublicIp
+  KeyPairSecret:
+    Description: The name of the key pair created
+    Value: !Ref EC2KeyPair
+  RDSEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt MySQLDatabase.Endpoint.Address
+  DatabaseName:
+    Description: Database Name
+    Value: !Ref DBName
+  VPCID:
+    Description: VPC ID
+    Value: !Ref VPC
