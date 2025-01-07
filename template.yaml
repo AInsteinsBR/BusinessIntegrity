@@ -45,9 +45,7 @@ Parameters:
     ConstraintDescription: Must contain only alphanumeric characters
   DBInstanceClass:
     Type: String
-    Default: db.t2.micro
-    AllowedValues:
-      - db.t2.micro
+    Default: db.t3.micro
     Description: Database instance class (Free Tier eligible)
 
 Resources:
@@ -72,15 +70,38 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-PublicSubnet1
 
-  PrivateSubnet1:
+  # Add second public subnet in different AZ
+  PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnet2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-PrivateSubnet1
+
+  # Add second private subnet in different AZ
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet2
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -113,17 +134,25 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
 
+  # Add route table association for second public subnet
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
   EC2KeyPair:
     Type: AWS::EC2::KeyPair
     Properties:
       KeyName: !Sub '${AWS::StackName}-key'
 
+  # Rest of the template remains the same, but update DBSubnetGroup
   WebAppInstance:
     Type: AWS::EC2::Instance
     DependsOn: AttachGateway
     Properties:
       InstanceType: !Ref InstanceType
-      ImageId: ami-0c7217cdde317cfec  # Amazon Linux 2023 AMI (us-east-1)
+      ImageId: ami-0c7217cdde317cfec
       KeyName: !Ref EC2KeyPair
       SubnetId: !Ref PublicSubnet1
       SecurityGroupIds: 
@@ -209,13 +238,14 @@ Resources:
       DBSubnetGroupDescription: Subnet group for RDS
       SubnetIds:
         - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2  # Add second private subnet
 
   MySQLDatabase:
     Type: AWS::RDS::DBInstance
     Properties:
       DBName: !Ref DBName
       Engine: mysql
-      EngineVersion: '8.0'
+      EngineVersion: '8.0'  # Now we can use MySQL 8.0 with t3.micro
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
       DBInstanceClass: !Ref DBInstanceClass
@@ -225,10 +255,11 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
       BackupRetentionPeriod: 7
-      MultiAZ: false
-      StorageType: gp2  # Changed to gp2 as it's included in free tier
+      MultiAZ: false  # Single-AZ for free tier
+      StorageType: gp2  # General Purpose SSD (gp2) for free tier
     DeletionPolicy: Snapshot
 
+# Outputs section remains the same
 Outputs:
   WebsiteURL:
     Description: URL for the deployed web application

@@ -10,7 +10,25 @@ fi
 STACK_NAME=$1
 KEY_FILE="${STACK_NAME}-key.pem"
 
-# Function to validate database name
+# Check if .env file exists
+if [ ! -f ".env" ]; then
+    echo "Error: .env file not found. Please create one with the required environment variables."
+    exit 1
+fi
+
+# Source environment variables from .env file
+export $(grep -v '^#' .env | xargs)
+
+# Validate required variables
+required_vars=("COHERE_API_KEY" "OPENAI_API_KEY" "SERPER_API_KEY" "DB_NAME" "DB_USER" "DB_PASSWORD")
+for var in "${required_vars[@]}"; do
+    if [ -z "${!var}" ]; then
+        echo "Error: $var is not set in the .env file."
+        exit 1
+    fi
+done
+
+# Validate database name and user
 validate_db_name() {
     local db_name=$1
     if [[ ! $db_name =~ ^[a-zA-Z][a-zA-Z0-9]*$ ]]; then
@@ -19,7 +37,6 @@ validate_db_name() {
     return 0
 }
 
-# Function to validate database user
 validate_db_user() {
     local db_user=$1
     if [[ ! $db_user =~ ^[a-zA-Z][a-zA-Z0-9]*$ ]]; then
@@ -28,50 +45,15 @@ validate_db_user() {
     return 0
 }
 
-# Function to prompt for a variable if not set
-prompt_var() {
-    local var_name=$1
-    local prompt_text=$2
-    local is_secret=$3
+if ! validate_db_name "$DB_NAME"; then
+    echo "Error: Invalid database name. Must start with a letter and contain only alphanumeric characters."
+    exit 1
+fi
 
-    while true; do
-        if [ "$is_secret" = "true" ]; then
-            read -s -p "$prompt_text: " value
-            echo
-        else
-            read -p "$prompt_text: " value
-        fi
-
-        case $var_name in
-            "DB_NAME")
-                if validate_db_name "$value"; then
-                    break
-                else
-                    echo "Database name must start with a letter and contain only alphanumeric characters (no underscores or special characters)"
-                fi
-                ;;
-            "DB_USER")
-                if validate_db_user "$value"; then
-                    break
-                else
-                    echo "Database user must start with a letter and contain only alphanumeric characters (no underscores or special characters)"
-                fi
-                ;;
-            "DB_PASSWORD")
-                if [[ ${#value} -ge 8 && "$value" =~ ^[a-zA-Z0-9]+$ ]]; then
-                    break
-                else
-                    echo "Password must be at least 8 characters and contain only alphanumeric characters"
-                fi
-                ;;
-            *)
-                break
-                ;;
-        esac
-    done
-
-    eval "$var_name='$value'"
-}
+if ! validate_db_user "$DB_USER"; then
+    echo "Error: Invalid database user. Must start with a letter and contain only alphanumeric characters."
+    exit 1
+fi
 
 # Check for AWS CLI and SAM CLI
 if ! command -v aws &> /dev/null; then
@@ -84,19 +66,8 @@ if ! command -v sam &> /dev/null; then
     exit 1
 fi
 
-# Prompt for environment variables if not set
-prompt_var "COHERE_API_KEY" "Enter Cohere API Key" true
-prompt_var "OPENAI_API_KEY" "Enter OpenAI API Key" true
-prompt_var "SERPER_API_KEY" "Enter Serper API Key" true
-
-# Prompt for database configuration
-echo "Database Configuration:"
-prompt_var "DB_NAME" "Enter Database Name (alphanumeric only, must start with a letter)" false
-prompt_var "DB_USER" "Enter Database User (alphanumeric only, must start with a letter)" false
-prompt_var "DB_PASSWORD" "Enter Database Password (min 8 characters, alphanumeric only)" true
-
 # Set instance types for free tier
-DB_INSTANCE_CLASS="db.t2.micro"
+DB_INSTANCE_CLASS="db.t3.micro"
 INSTANCE_TYPE="t2.micro"
 
 echo "Using free tier eligible instances:"
