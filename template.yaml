@@ -160,14 +160,20 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          yum update -y
-          yum install -y python3 python3-pip git
-          cd /home/ec2-user
+          sudo apt update -y
+          sudo apt install -y python3 python3-pip python3-venv git
+
+          # Setup application
+          cd /home/ubuntu
           git clone https://github.com/AInsteinsBR/BusinessIntegrity.git
           cd BusinessIntegrity
 
+          # Create and activate virtual environment
+          python3 -m venv venv
+          source venv/bin/activate
+
           # Create .env file with environment variables
-          cat > .env << EOL
+          sudo bash -c 'cat > .env << EOL
           COHERE_API_KEY=${CohereApiKey}
           OPENAI_API_KEY=${OpenAIApiKey}
           SERPER_API_KEY=${SerperApiKey}
@@ -175,32 +181,33 @@ Resources:
           DB_USER=${DBUser}
           DB_PASSWORD=${DBPassword}
           DB_NAME=${DBName}
-          EOL
+          EOL'
 
+          # Install dependencies and initialize database
           pip3 install -r requirements.txt
-          python3 -m venv venv
-          source venv/bin/activate
           python3 config.py
           
           # Create and configure systemd service
-          cat > /etc/systemd/system/flaskapp.service << EOL
+          sudo bash -c 'cat > /etc/systemd/system/flaskapp.service << EOL
           [Unit]
           Description=Flask App Service
           After=network.target
 
           [Service]
-          User=ec2-user
-          WorkingDirectory=/home/ec2-user/BusinessIntegrity
-          Environment="PATH=/home/ec2-user/BusinessIntegrity/venv/bin"
-          ExecStart=/home/ec2-user/BusinessIntegrity/venv/bin/python3 app.py
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu/BusinessIntegrity
+          Environment="PATH=/home/ubuntu/BusinessIntegrity/venv/bin"
+          ExecStart=/home/ubuntu/BusinessIntegrity/venv/bin/python3 app.py
           Restart=always
 
           [Install]
           WantedBy=multi-user.target
-          EOL
+          EOL'
 
-          systemctl enable flaskapp
-          systemctl start flaskapp
+          # Enable and start the service
+          sudo systemctl daemon-reload
+          sudo systemctl enable flaskapp
+          sudo systemctl start flaskapp
 
   WebAppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
