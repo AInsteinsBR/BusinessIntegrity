@@ -185,11 +185,11 @@ Resources:
           DB_PASSWORD=${DBPassword}
           EOF
 
-          chmod +x entrypoint.sh
+          sudo chmod +x entrypoint.sh
 
-          docker build -t business-analysis .
+          sudo docker build -t business-analysis .
 
-          docker run -d \
+          sudo docker run -d \
             --name business-analysis \
             --restart unless-stopped \
             -p 80:5000 \
