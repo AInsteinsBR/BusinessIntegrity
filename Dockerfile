@@ -20,12 +20,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Set environment variables
 ENV FLASK_APP=app/app.py
+ENV FLASK_ENV=production
 
 # Expose port
 EXPOSE 5000
 
-# Run config.py first to set up the database
-RUN python config.py
+# Create entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Run the application
-CMD ["flask", "run", "--host=0.0.0.0"]
+# Use entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
