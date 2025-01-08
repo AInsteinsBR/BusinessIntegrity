@@ -151,7 +151,7 @@ Resources:
     DependsOn: AttachGateway
     Properties:
       InstanceType: !Ref InstanceType
-      ImageId: ami-0c7217cdde317cfec
+      ImageId: ami-0e731c8a588258d0d
       SubnetId: !Ref PublicSubnet1
       SecurityGroupIds:
         - !Ref WebAppSecurityGroup
@@ -162,18 +162,13 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
-          sudo apt update -y
-          sudo apt install -y docker
-          service docker start
+          dnf update -y
+          dnf install -y docker git
+          systemctl start docker
+          systemctl enable docker
           usermod -a -G docker ec2-user
-          chkconfig docker on
-
-          # Install Docker Compose
-          curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          chmod +x /usr/local/bin/docker-compose
 
           # Clone application repository
-          sudo apt install -y git
           cd /home/ec2-user
           git clone https://github.com/AInsteinsBR/BusinessIntegrity.git
           cd BusinessIntegrity
@@ -194,6 +189,7 @@ Resources:
           docker build -t business-analysis .
           docker run -d \
             --name business-analysis \
+            --restart unless-stopped \
             -p 80:5000 \
             --env-file .env \
             business-analysis
