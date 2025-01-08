@@ -66,6 +66,21 @@ if ! command -v sam &> /dev/null; then
     exit 1
 fi
 
+# Check for Docker
+if ! command -v docker &> /dev/null; then
+    echo "Docker is not installed locally. Note: Docker will be installed on the EC2 instance automatically."
+fi
+
+# Build Docker image locally to test
+echo "Building Docker image locally for testing..."
+if docker build -t business-analysis-test .; then
+    echo "Docker build successful"
+    docker rmi business-analysis-test
+else
+    echo "Docker build failed. Please fix any issues before deploying."
+    exit 1
+fi
+
 # Set instance types for free tier
 DB_INSTANCE_CLASS="db.t3.micro"
 INSTANCE_TYPE="t2.micro"

@@ -146,68 +146,57 @@ Resources:
     Properties:
       KeyName: !Sub '${AWS::StackName}-key'
 
-  # Rest of the template remains the same, but update DBSubnetGroup
   WebAppInstance:
     Type: AWS::EC2::Instance
     DependsOn: AttachGateway
     Properties:
       InstanceType: !Ref InstanceType
       ImageId: ami-0c7217cdde317cfec
-      KeyName: !Ref EC2KeyPair
       SubnetId: !Ref PublicSubnet1
-      SecurityGroupIds: 
+      SecurityGroupIds:
         - !Ref WebAppSecurityGroup
+      KeyName: !Ref EC2KeyPair
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-WebApp
       UserData:
         Fn::Base64: !Sub |
-          #!/bin/bash
+          #!/bin/bash -xe
           sudo apt update -y
-          sudo apt install -y python3 python3-pip python3-venv git
+          sudo apt install -y docker
+          service docker start
+          usermod -a -G docker ec2-user
+          chkconfig docker on
 
-          # Setup application
-          cd /home/ubuntu
+          # Install Docker Compose
+          curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+
+          # Clone application repository
+          sudo apt install -y git
+          cd /home/ec2-user
           git clone https://github.com/AInsteinsBR/BusinessIntegrity.git
           cd BusinessIntegrity
 
-          # Create and activate virtual environment
-          python3 -m venv venv
-          source venv/bin/activate
-
-          # Create .env file with environment variables
-          sudo bash -c 'cat > .env << EOL
+          # Set environment variables
+          cat << EOF > .env
           COHERE_API_KEY=${CohereApiKey}
           OPENAI_API_KEY=${OpenAIApiKey}
           SERPER_API_KEY=${SerperApiKey}
           DB_HOST=${MySQLDatabase.Endpoint.Address}
+          DB_PORT=3306
+          DB_NAME=${DBName}
           DB_USER=${DBUser}
           DB_PASSWORD=${DBPassword}
-          DB_NAME=${DBName}
-          EOL'
+          EOF
 
-          # Install dependencies and initialize database
-          pip3 install -r requirements.txt
-          python3 config.py
-          
-          # Create and configure systemd service
-          sudo bash -c 'cat > /etc/systemd/system/flaskapp.service << EOL
-          [Unit]
-          Description=Flask App Service
-          After=network.target
-
-          [Service]
-          User=ubuntu
-          WorkingDirectory=/home/ubuntu/BusinessIntegrity
-          Environment="PATH=/home/ubuntu/BusinessIntegrity/venv/bin"
-          ExecStart=/home/ubuntu/BusinessIntegrity/venv/bin/python3 app.py
-          Restart=always
-
-          [Install]
-          WantedBy=multi-user.target
-          EOL'
-
-          # Enable and start the service
-          sudo systemctl daemon-reload
-          sudo systemctl enable flaskapp
-          sudo systemctl start flaskapp
+          # Build and run Docker container
+          docker build -t business-analysis .
+          docker run -d \
+            --name business-analysis \
+            -p 80:5000 \
+            --env-file .env \
+            business-analysis
 
   WebAppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -245,28 +234,27 @@ Resources:
       DBSubnetGroupDescription: Subnet group for RDS
       SubnetIds:
         - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2  # Add second private subnet
+        - !Ref PrivateSubnet2
 
   MySQLDatabase:
     Type: AWS::RDS::DBInstance
     Properties:
       DBName: !Ref DBName
       Engine: mysql
-      EngineVersion: '8.0'  # Now we can use MySQL 8.0 with t3.micro
+      EngineVersion: '8.0'
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: '20'
-      VPCSecurityGroups: 
+      VPCSecurityGroups:
         - !GetAtt DBSecurityGroup.GroupId
       DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
       BackupRetentionPeriod: 7
-      MultiAZ: false  # Single-AZ for free tier
-      StorageType: gp2  # General Purpose SSD (gp2) for free tier
+      MultiAZ: false
+      StorageType: gp2
     DeletionPolicy: Snapshot
 
-# Outputs section remains the same
 Outputs:
   WebsiteURL:
     Description: URL for the deployed web application
