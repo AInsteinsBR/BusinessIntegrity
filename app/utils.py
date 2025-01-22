@@ -278,9 +278,40 @@ async def scrape_content(search_results):
 
 
 def validate_cnpj(cnpj):
-    """Validate the CNPJ format (Brazilian business number)."""
-    cnpj_regex = r"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$"
-    return re.match(cnpj_regex, cnpj) is not None
+    """Validate the CNPJ format (Brazilian business number).
+    Accepts both formatted (XX.XXX.XXX/XXXX-XX) and unformatted (XXXXXXXXXXXXXX) CNPJs.
+    """
+    # Remove any non-digit characters
+    cnpj_digits = "".join(filter(str.isdigit, cnpj))
+
+    # Check if we have exactly 14 digits
+    if len(cnpj_digits) != 14:
+        return False
+
+    # Check if all digits are the same (invalid but would pass verification)
+    if len(set(cnpj_digits)) == 1:
+        return False
+
+    # Calculate first verification digit
+    def calc_digit(cnpj_partial):
+        weights = (
+            [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+            if len(cnpj_partial) == 12
+            else [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+        )
+        total = sum(int(digit) * weight for digit, weight in zip(cnpj_partial, weights))
+        remainder = total % 11
+        return "0" if remainder < 2 else str(11 - remainder)
+
+    # Verify first digit
+    if calc_digit(cnpj_digits[:12]) != cnpj_digits[12]:
+        return False
+
+    # Verify second digit
+    if calc_digit(cnpj_digits[:13]) != cnpj_digits[13]:
+        return False
+
+    return True
 
 
 async def run_search(query):

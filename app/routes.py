@@ -26,7 +26,7 @@ def register_search_routes(app):
 async def search():
     data = request.json
     search_type = data.get("searchType")
-    input_value = data.get("inputValue")
+    input_value = data.get("inputValue", "").strip()
 
     if not input_value:
         return jsonify({"error": "Input value is required"}), 400
@@ -40,10 +40,18 @@ async def search():
             return jsonify({"Status": f"Análise concluída com ID: {analysis_id}"})
 
         elif search_type == "cnpj":
-            cnpj = input_value
+            # Remove any formatting from CNPJ if present
+            cnpj = "".join(filter(str.isdigit, input_value))
+
+            # Format CNPJ for display
+            formatted_cnpj = (
+                f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
+            )
+
             if not validate_cnpj(cnpj):
-                return jsonify({"error": "Invalid CNPJ format"}), 400
-            analysis_id = await process_cnpj_search(cnpj)
+                return jsonify({"error": "CNPJ inválido"}), 400
+
+            analysis_id = await process_cnpj_search(formatted_cnpj)
             if analysis_id is None:
                 return jsonify({"error": "No results found"})
             return jsonify({"Status": f"Análise concluída com ID: {analysis_id}"})

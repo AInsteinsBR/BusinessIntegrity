@@ -114,6 +114,28 @@
                 font-size: 1rem;
             }
         }
+
+        .invalid-input {
+            border-color: #e74c3c;
+            background-color: #ffd7d7;
+        }
+        
+        .valid-input {
+            border-color: #2ecc71;
+            background-color: #d4ffda;
+        }
+        
+        .input-feedback {
+            font-size: 0.8rem;
+            margin-top: -15px;
+            margin-bottom: 10px;
+            display: none;
+        }
+        
+        .loading {
+            cursor: wait !important;
+            opacity: 0.7;
+        }
     </style>
 </head>
 
@@ -125,6 +147,8 @@
             <label for="inputValue">Digite sua busca:</label>
             <input type="text" id="inputValue" name="inputValue" placeholder="Digite sua busca ou CNPJ" required>
         </div>
+
+        <div id="inputFeedback" class="input-feedback"></div>
 
         <button id="searchQueryBtn">Buscar por Nome da Empresa</button>
         <button id="searchCnpjBtn">Buscar por CNPJ</button>
@@ -168,6 +192,30 @@
             }
         }
 
+        function formatCNPJ(cnpj) {
+            const digits = cnpj.replace(/\D/g, '');
+            if (digits.length <= 2) return digits;
+            if (digits.length <= 5) return digits.replace(/(\d{2})(\d+)/, '$1.$2');
+            if (digits.length <= 8) return digits.replace(/(\d{2})(\d{3})(\d+)/, '$1.$2.$3');
+            if (digits.length <= 12) return digits.replace(/(\d{2})(\d{3})(\d{3})(\d+)/, '$1.$2.$3/$4');
+            return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, '$1.$2.$3/$4-$5');
+        }
+
+        inputValue.addEventListener('input', (e) => {
+            if (e.target.value) {
+                const formatted = formatCNPJ(e.target.value);
+                e.target.value = formatted;
+            }
+        });
+
+        function setLoadingState(loading) {
+            [searchQueryBtn, searchCnpjBtn].forEach(btn => {
+                btn.disabled = loading;
+                btn.classList.toggle('loading', loading);
+            });
+            inputValue.disabled = loading;
+        }
+
         searchQueryBtn.addEventListener("click", async () => {
             const query = inputValue.value;
             if (!query) {
@@ -194,12 +242,16 @@
                 markdownOutput.innerHTML = "<p>Por favor, insira um CNPJ.</p>";
                 return;
             }
+
+            setLoadingState(true);
             markdownOutput.innerHTML = "<p>Buscando...</p>";
 
             const data = await fetchData("/search", "POST", {
                 searchType: "cnpj",
                 inputValue: cnpj,
             });
+
+            setLoadingState(false);
 
             if (data.error) {
                 markdownOutput.innerHTML = `<p style="color: red;">Erro: ${data.error}</p>`;
